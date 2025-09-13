@@ -1,0 +1,11 @@
+pr_actions:
+  summarise: true
+  analyse_risk: true
+  suggest_tests: true
+  approve_if_low_risk: true
+  auto_merge: false
+risk_thresholds:
+  low: 0.3
+labels:
+  low_risk: ai-approved
+  high_risk: needs-review
