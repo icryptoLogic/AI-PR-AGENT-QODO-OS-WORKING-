@@ -25,7 +25,7 @@ jobs:
           git commit -m "feat: hello world AI demo"
           git push origin feature/hello
       - name: Open PR
-        uses: peter-evans/create-pull-request@v5
+        uses: peter-evans/create-pull-request@v7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           branch: feature/hello
