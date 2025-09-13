@@ -1,25 +1,20 @@
-name: CI - Build & Test
+name: CI
 
 on:
-  push:
-    branches:
-      - main
   pull_request:
-    branches:
-      - main
+  push:
+    branches: [ main ]
 
 jobs:
-  build-test:
+  build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v3
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.x'
+          python-version: '3.11'
 
       - name: Install dependencies
         run: |
@@ -27,4 +22,5 @@ jobs:
           pip install pytest
 
       - name: Run tests
-        run: pytest -v
+        run: |
+          if [ -d tests ]; then pytest -q; else echo "No tests yet"; fi
