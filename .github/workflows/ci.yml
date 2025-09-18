@@ -88,3 +88,31 @@ jobs:
         with:
           name: pr-metrics
           path: metrics.json
+
+            comment-metrics:
+    needs: build-test
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Comment Risk Score & Build Stats
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const risk = "${{needs.build-test.outputs.risk_score}}";
+            const success = "${{needs.build-test.outputs.pipeline_success}}";
+            const time = "${{needs.build-test.outputs.avg_build_time}}";
+            const body = `
+            ### 🚦 CI Metrics
+            | Metric | Value |
+            |--------|-------|
+            | Risk Score | ${risk} / 100 |
+            | Pipeline Success | ${success}% |
+            | Avg Build Time | ${time} |
+            `;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
+
