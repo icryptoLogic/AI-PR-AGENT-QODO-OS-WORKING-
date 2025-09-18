@@ -4,8 +4,19 @@ pr_actions:
   suggest_tests: true
   approve_if_low_risk: true
   auto_merge: false
+  include_metrics: true
+
+metrics:
+  source_artifact: pr-metrics
+  fields:
+    - risk_score
+    - pipeline_success
+    - avg_build_time
+
 risk_thresholds:
   low: 0.3
+
 labels:
   low_risk: ai-approved
   high_risk: needs-review
+
