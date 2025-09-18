@@ -1,42 +1,29 @@
-name: Hello World PR Pipeline
+name: Auto PR Agent
 
 on:
-  workflow_dispatch:
-  schedule:
-    - cron: '0 12 * * *'   # Daily demo run
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 jobs:
-  create-pr:
+  pr-agent:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
     steps:
-      - uses: actions/checkout@v4
-      - name: Create hello.py
-        run: |
-          echo 'print("Hello from AI-powered PR demo!")' > src/hello.py
-      - name: Commit & Push
-        run: |
-          git config user.name "GitHub Action"
-          git config user.email "action@github.com"
-          git checkout -b feature/hello
-          git add src/hello.py
-          git commit -m "feat: hello world AI demo"
-          git push origin feature/hello
-      - name: Open PR
-        uses: peter-evans/create-pull-request@v5
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          branch: feature/hello
-          title: "Hello World AI PR"
-          body: "Automatically generated PR with Hello World script."
+      - name: Checkout
+        uses: actions/checkout@v3
 
-  ai-review:
-    runs-on: ubuntu-latest
-    needs: create-pr
-    steps:
-      - uses: qodo-ai/pr-agent@latest
+      # ⬇️ Download metrics artifact from CI
+      - name: Download CI metrics
+        uses: actions/download-artifact@v3
+        with:
+          name: pr-metrics
+          path: ./metrics
+
+      # Optional: show the file for debugging
+      - name: Show metrics.json
+        run: cat ./metrics/metrics.json || echo "No metrics.json found"
+
+      - name: Run PR Agent
+        uses: Codium-ai/pr-agent@latest
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           config_path: .github/pr-agent.yml
