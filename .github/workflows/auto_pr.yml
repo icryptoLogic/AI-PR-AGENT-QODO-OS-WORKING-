@@ -4,15 +4,18 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened]
   pull_request_target:
 
 permissions:
   contents: write
   pull-requests: write
+  pages: write
+  id-token: write
 
 jobs:
   # -----------------------------
-  # CI: Tests + Security + Metrics (safe for fork PRs)
+  # CI: Tests + Security + Metrics
   # -----------------------------
   build-test:
     runs-on: ubuntu-latest
@@ -23,7 +26,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -61,7 +64,6 @@ jobs:
           build_min=$((build_time / 60))
           build_sec=$((build_time % 60))
 
-          # pipeline success rate
           if [ "$pytest_exit" -eq 0 ] && [ "$bandit_exit" -eq 0 ]; then
             success=100
           elif [ "$pytest_exit" -eq 0 ] || [ "$bandit_exit" -eq 0 ]; then
@@ -70,7 +72,6 @@ jobs:
             success=0
           fi
 
-          # risk score (lower is safer)
           issues=$(grep -c "Issue:" bandit_report.txt || true)
           tests_failed=$(grep -c "FAILED" pytest_results.txt || true)
           risk=$(( (issues * 5) + (tests_failed * 10) ))
@@ -81,7 +82,7 @@ jobs:
           echo "avg_build_time=${build_min}m${build_sec}s" >> $GITHUB_OUTPUT
 
   # -----------------------------
-  # Comment metrics (needs write perms, use pull_request_target)
+  # Comment metrics
   # -----------------------------
   comment-metrics:
     needs: build-test
@@ -134,10 +135,10 @@ jobs:
             echo "ai_approved=true" >> $GITHUB_OUTPUT
           else
             echo "ai_approved=false" >> $GITHUB_OUTPUT
-            fi
+          fi
 
   # -----------------------------
-  # Auto-merge if low risk + all checks pass
+  # Auto-merge if low risk
   # -----------------------------
   auto-merge:
     needs: [build-test, pr-agent]
@@ -150,7 +151,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # -----------------------------
-  # Publish PR Summary JSON for Dashboard
+  # Publish Dashboard JSON + GitHub Pages
   # -----------------------------
   publish-dashboard:
     needs: [build-test, pr-agent, auto-merge]
@@ -158,7 +159,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -185,3 +186,32 @@ jobs:
           git add reports/
           git commit -m "Add PR summary for #${{ github.event.pull_request.number }}"
           git push origin reports --force
+
+      - name: Upload JSON Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard
+          path: reports/pr_summary_${{ github.event.pull_request.number }}.json
+
+  # -----------------------------
+  # Deploy GitHub Pages
+  # -----------------------------
+  deploy-pages:
+    needs: publish-dashboard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout reports branch
+        uses: actions/checkout@v4
+        with:
+          ref: reports
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./reports
+
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4
