@@ -94,7 +94,7 @@ jobs:
             const risk = "${{needs.build-test.outputs.risk_score}}";
             const success = "${{needs.build-test.outputs.pipeline_success}}";
             const time = "${{needs.build-test.outputs.avg_build_time}}";
-            const url = "https://YOUR_USER.github.io/YOUR_REPO/";
+            const url = "https://icryptologic.github.io/AI-PR-AGENT-QODO-OS-WORKING/";
             const body = `
             ### 🚦 CI Metrics
             | Metric | Value |
