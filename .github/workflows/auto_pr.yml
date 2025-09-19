@@ -14,9 +14,9 @@ permissions:
   id-token: write
 
 jobs:
-  # -----------------------------
-  # CI: Tests + Security + Metrics
-  # -----------------------------
+  # ----------------------------------------------------
+  # 1. CI: run tests, bandit, collect metrics
+  # ----------------------------------------------------
   build-test:
     runs-on: ubuntu-latest
     outputs:
@@ -25,15 +25,13 @@ jobs:
       avg_build_time: ${{ steps.metrics.outputs.avg_build_time }}
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install pytest bandit jq
@@ -49,7 +47,7 @@ jobs:
           pytest --maxfail=1 --disable-warnings -q > pytest_results.txt
           echo "pytest_exit=$?" >> $GITHUB_ENV
 
-      - name: Run Bandit (security scan)
+      - name: Run Bandit
         id: bandit
         continue-on-error: true
         run: |
@@ -81,16 +79,15 @@ jobs:
           echo "pipeline_success=$success" >> $GITHUB_OUTPUT
           echo "avg_build_time=${build_min}m${build_sec}s" >> $GITHUB_OUTPUT
 
-  # -----------------------------
-  # Comment metrics
-  # -----------------------------
+  # ----------------------------------------------------
+  # 2. Comment metrics on PR
+  # ----------------------------------------------------
   comment-metrics:
     needs: build-test
     if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     steps:
-      - name: Comment Risk Score & Build Stats
-        uses: actions/github-script@v6
+      - uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -101,7 +98,7 @@ jobs:
             ### 🚦 CI Metrics
             | Metric | Value |
             |--------|-------|
-            | Risk Score | ${risk} / 100 |
+            | Risk Score | ${risk}/100 |
             | Pipeline Success | ${success}% |
             | Avg Build Time | ${time} |
             `;
@@ -112,9 +109,9 @@ jobs:
               body
             });
 
-  # -----------------------------
-  # AI PR Agent Review
-  # -----------------------------
+  # ----------------------------------------------------
+  # 3. AI PR Agent Review
+  # ----------------------------------------------------
   pr-agent:
     needs: build-test
     if: github.event_name == 'pull_request_target'
@@ -137,81 +134,91 @@ jobs:
             echo "ai_approved=false" >> $GITHUB_OUTPUT
           fi
 
-  # -----------------------------
-  # Auto-merge if low risk
-  # -----------------------------
+  # ----------------------------------------------------
+  # 4. Auto-merge if low risk
+  # ----------------------------------------------------
   auto-merge:
     needs: [build-test, pr-agent]
     if: github.event_name == 'pull_request_target' && needs.pr-agent.outputs.ai_approved == 'true' && needs.build-test.outputs.pipeline_success == '100'
     runs-on: ubuntu-latest
     steps:
-      - name: Auto-merge PR
-        uses: pascalgn/automerge-action@v0.16.3
+      - uses: pascalgn/automerge-action@v0.16.3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # -----------------------------
-  # Publish Dashboard JSON + GitHub Pages
-  # -----------------------------
+  # ----------------------------------------------------
+  # 5. Publish Dashboard JSON
+  # ----------------------------------------------------
   publish-dashboard:
     needs: [build-test, pr-agent, auto-merge]
     if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
+    outputs:
+      json_path: ${{ steps.make.outputs.json_path }}
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Create PR Summary JSON
+      - name: Make PR JSON
+        id: make
         run: |
           mkdir -p reports
-          cat <<EOF > reports/pr_summary_${{ github.event.pull_request.number }}.json
+          path="reports/pr_${{ github.event.pull_request.number }}.json"
+          cat <<EOF > $path
           {
             "pr_number": "${{ github.event.pull_request.number }}",
             "title": "${{ github.event.pull_request.title }}",
             "risk_score": "${{ needs.build-test.outputs.risk_score }}",
             "pipeline_success": "${{ needs.build-test.outputs.pipeline_success }}",
             "avg_build_time": "${{ needs.build-test.outputs.avg_build_time }}",
-            "ai_approved": "${{ needs.pr-agent.outputs.ai_approved }}",
-            "auto_merge": "${{ (needs.pr-agent.outputs.ai_approved == 'true' && needs.build-test.outputs.pipeline_success == '100') && 'yes' || 'no' }}"
+            "ai_approved": "${{ needs.pr-agent.outputs.ai_approved }}"
           }
           EOF
+          echo "json_path=$path" >> $GITHUB_OUTPUT
 
-      - name: Commit & Push Report to reports branch
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git checkout -B reports
-          git add reports/
-          git commit -m "Add PR summary for #${{ github.event.pull_request.number }}"
-          git push origin reports --force
-
-      - name: Upload JSON Artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: dashboard
-          path: reports/pr_summary_${{ github.event.pull_request.number }}.json
+          name: pr-json
+          path: ${{ steps.make.outputs.json_path }}
 
-  # -----------------------------
-  # Deploy GitHub Pages
-  # -----------------------------
+  # ----------------------------------------------------
+  # 6. Send JSON to Figma
+  # ----------------------------------------------------
+  send-to-figma:
+    needs: publish-dashboard
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: pr-json
+          path: ./out
+
+      - name: Post to Figma REST API
+        env:
+          FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}
+          FIGMA_FILE_KEY: 1430507240568862216
+        run: |
+          content=$(cat out/*.json | jq -Rs .)
+          curl -X POST \
+            -H "X-Figma-Token: $FIGMA_TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://api.figma.com/v1/files/$FIGMA_FILE_KEY/comments" \
+            -d "{\"message\": \"PR Metrics\", \"client_meta\": {}, \"comment\": $content }"
+
+  # ----------------------------------------------------
+  # 7. Deploy Pages (optional)
+  # ----------------------------------------------------
   deploy-pages:
     needs: publish-dashboard
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout reports branch
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: reports
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+      - uses: actions/configure-pages@v4
+      - uses: actions/upload-pages-artifact@v3
         with:
           path: ./reports
-
-      - name: Deploy to GitHub Pages
-        uses: actions/deploy-pages@v4
+      - uses: actions/deploy-pages@v4
