@@ -11,54 +11,17 @@
       --accent: #38bdf8;
       --text: #f1f5f9;
     }
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      font-family: system-ui, sans-serif;
-    }
-    body {
-      background: var(--bg);
-      color: var(--text);
-      padding: 2rem;
-    }
-    h1 {
-      text-align: center;
-      margin-bottom: 2rem;
-      font-size: 2rem;
-    }
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 1.5rem;
-    }
-    .card {
-      background: var(--card);
-      padding: 1.5rem;
-      border-radius: 1rem;
-      box-shadow: 0 4px 8px rgba(0,0,0,0.3);
-    }
-    .card h2 {
-      font-size: 1.25rem;
-      margin-bottom: 0.75rem;
-      color: var(--accent);
-    }
-    .btn {
-      display: inline-block;
-      background: var(--accent);
-      color: #000;
-      padding: 0.5rem 1rem;
-      border-radius: 0.5rem;
-      text-decoration: none;
-      margin-top: 0.75rem;
-      font-weight: 600;
-    }
-    footer {
-      text-align: center;
-      margin-top: 2rem;
-      font-size: 0.9rem;
-      opacity: 0.7;
-    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, sans-serif; }
+    body { background: var(--bg); color: var(--text); padding: 2rem; }
+    h1 { text-align: center; margin-bottom: 2rem; font-size: 2rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px,1fr)); gap: 1.5rem; }
+    .card { background: var(--card); padding: 1.5rem; border-radius: 1rem; box-shadow: 0 4px 8px rgba(0,0,0,0.3); }
+    .card h2 { font-size: 1.25rem; margin-bottom: .75rem; color: var(--accent); }
+    .btn { display:inline-block; background:var(--accent); color:#000; padding:.5rem 1rem; border-radius:.5rem; text-decoration:none; margin-top:.75rem; font-weight:600;}
+    footer { text-align:center; margin-top:2rem; font-size:.9rem; opacity:.7; }
+    table { margin-top:1rem; border-collapse:collapse; width:100%; }
+    th,td { border:1px solid #475569; padding:.5rem; text-align:left; }
+    th { background:#1e293b; }
   </style>
 </head>
 <body>
@@ -69,6 +32,7 @@
       <h2>Pull Requests</h2>
       <p>Monitor open pull requests and summaries.</p>
       <a href="#" class="btn">View PRs</a>
+      <div id="pr-data"></div>
     </div>
 
     <div class="card">
@@ -90,8 +54,31 @@
     </div>
   </div>
 
-  <footer>
-    © 2025 AI-PR-AGENT | Built with ♥ for GitHub Pages
-  </footer>
+  <footer>© 2025 AI-PR-AGENT | Built with ♥ for GitHub Pages</footer>
+
+  <script>
+    // Fetch latest JSON from the reports branch
+    async function loadLatest() {
+      try {
+        const res = await fetch('pr_summary_' + 'latest.json'); // optional: or keep a manifest.json
+        if (!res.ok) throw new Error('No summary yet');
+        const data = await res.json();
+
+        document.getElementById('pr-data').innerHTML = `
+          <table>
+            <tr><th>PR #</th><td>${data.pr_number}</td></tr>
+            <tr><th>Title</th><td>${data.title}</td></tr>
+            <tr><th>Risk</th><td>${data.risk_score}/100</td></tr>
+            <tr><th>Success</th><td>${data.pipeline_success}%</td></tr>
+            <tr><th>Build Time</th><td>${data.avg_build_time}</td></tr>
+            <tr><th>AI Approved</th><td>${data.ai_approved}</td></tr>
+          </table>`;
+      } catch (e) {
+        document.getElementById('pr-data').innerHTML =
+          '<p>No PR data published yet.</p>';
+      }
+    }
+    loadLatest();
+  </script>
 </body>
 </html>
