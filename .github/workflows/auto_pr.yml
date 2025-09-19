@@ -1,9 +1,14 @@
 name: AI PR CI Pipeline
 
 on:
-  pull_request:
   push:
     branches: [main]
+  pull_request:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
 
 jobs:
   # -----------------------------
@@ -56,7 +61,6 @@ jobs:
           build_min=$((build_time / 60))
           build_sec=$((build_time % 60))
 
-          # pipeline success rate
           if [ "$pytest_exit" -eq 0 ] && [ "$bandit_exit" -eq 0 ]; then
             success=100
           elif [ "$pytest_exit" -eq 0 ] || [ "$bandit_exit" -eq 0 ]; then
@@ -65,7 +69,6 @@ jobs:
             success=0
           fi
 
-          # risk score (lower is safer)
           issues=$(grep -c "Issue:" bandit_report.txt || true)
           tests_failed=$(grep -c "FAILED" pytest_results.txt || true)
           risk=$(( (issues * 5) + (tests_failed * 10) ))
@@ -74,6 +77,36 @@ jobs:
           echo "risk_score=$risk" >> $GITHUB_OUTPUT
           echo "pipeline_success=$success" >> $GITHUB_OUTPUT
           echo "avg_build_time=${build_min}m${build_sec}s" >> $GITHUB_OUTPUT
+
+  # -----------------------------
+  # Post metrics as PR comment
+  # -----------------------------
+  comment-metrics:
+    needs: build-test
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Comment Risk Score & Build Stats
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const risk = "${{needs.build-test.outputs.risk_score}}";
+            const success = "${{needs.build-test.outputs.pipeline_success}}";
+            const time = "${{needs.build-test.outputs.avg_build_time}}";
+            const body = `
+            ### 🚦 CI Metrics
+            | Metric | Value |
+            |--------|-------|
+            | Risk Score | ${risk} / 100 |
+            | Pipeline Success | ${success}% |
+            | Avg Build Time | ${time} |
+            `;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
 
   # -----------------------------
   # AI PR Agent Review
@@ -100,15 +133,12 @@ jobs:
             echo "ai_approved=false" >> $GITHUB_OUTPUT
 
   # -----------------------------
-  # Auto-merge if low risk + all checks pass
+  # Auto-merge if low risk
   # -----------------------------
   auto-merge:
     needs: [build-test, pr-agent]
     if: needs.pr-agent.outputs.ai_approved == 'true' && needs.build-test.outputs.pipeline_success == '100'
     runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-      contents: write
     steps:
       - name: Auto-merge PR
         uses: pascalgn/automerge-action@v0.16.3
@@ -116,7 +146,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # -----------------------------
-  # Publish PR Summary JSON for Dashboard
+  # Publish PR Summary JSON → GitHub Pages
   # -----------------------------
   publish-dashboard:
     needs: [build-test, pr-agent, auto-merge]
@@ -125,13 +155,11 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
 
-      - name: Create PR Summary JSON
+      - name: Generate JSON files
         run: |
-          mkdir -p reports
-          cat <<EOF > reports/pr_summary_${{ github.event.pull_request.number }}.json
+          mkdir -p public
+          cat <<EOF > public/pr_summary_${{ github.event.pull_request.number }}.json
           {
             "pr_number": "${{ github.event.pull_request.number }}",
             "title": "${{ github.event.pull_request.title }}",
@@ -139,15 +167,24 @@ jobs:
             "pipeline_success": "${{ needs.build-test.outputs.pipeline_success }}",
             "avg_build_time": "${{ needs.build-test.outputs.avg_build_time }}",
             "ai_approved": "${{ needs.pr-agent.outputs.ai_approved }}",
-            "auto_merge": "${{ (needs.pr-agent.outputs.ai_approved == 'true' && needs.build-test.outputs.pipeline_success == '100') && 'yes' || 'no' } }"
+            "auto_merge": "${{ (needs.pr-agent.outputs.ai_approved == 'true' && needs.build-test.outputs.pipeline_success == '100') && 'yes' || 'no' }}"
           }
           EOF
 
-      - name: Commit & Push Report to reports branch
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git checkout -B reports
-          git add reports/
-          git commit -m "Add PR summary for #${{ github.event.pull_request.number }}"
-          git push origin reports --force
+          cp public/pr_summary_${{ github.event.pull_request.number }}.json public/latest.json
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy-pages:
+    needs: publish-dashboard
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
