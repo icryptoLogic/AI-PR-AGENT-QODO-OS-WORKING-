@@ -134,6 +134,7 @@ jobs:
             echo "ai_approved=true" >> $GITHUB_OUTPUT
           else
             echo "ai_approved=false" >> $GITHUB_OUTPUT
+            fi
 
   # -----------------------------
   # Auto-merge if low risk + all checks pass
