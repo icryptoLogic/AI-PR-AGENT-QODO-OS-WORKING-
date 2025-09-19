@@ -4,15 +4,15 @@ on:
   push:
     branches: [main]
   pull_request:
+  pull_request_target:
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
+  pull-requests: write
 
 jobs:
   # -----------------------------
-  # CI: Tests + Security + Metrics
+  # CI: Tests + Security + Metrics (safe for fork PRs)
   # -----------------------------
   build-test:
     runs-on: ubuntu-latest
@@ -61,6 +61,7 @@ jobs:
           build_min=$((build_time / 60))
           build_sec=$((build_time % 60))
 
+          # pipeline success rate
           if [ "$pytest_exit" -eq 0 ] && [ "$bandit_exit" -eq 0 ]; then
             success=100
           elif [ "$pytest_exit" -eq 0 ] || [ "$bandit_exit" -eq 0 ]; then
@@ -69,6 +70,7 @@ jobs:
             success=0
           fi
 
+          # risk score (lower is safer)
           issues=$(grep -c "Issue:" bandit_report.txt || true)
           tests_failed=$(grep -c "FAILED" pytest_results.txt || true)
           risk=$(( (issues * 5) + (tests_failed * 10) ))
@@ -79,16 +81,17 @@ jobs:
           echo "avg_build_time=${build_min}m${build_sec}s" >> $GITHUB_OUTPUT
 
   # -----------------------------
-  # Post metrics as PR comment
+  # Comment metrics (needs write perms, use pull_request_target)
   # -----------------------------
   comment-metrics:
     needs: build-test
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     steps:
       - name: Comment Risk Score & Build Stats
         uses: actions/github-script@v6
         with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const risk = "${{needs.build-test.outputs.risk_score}}";
             const success = "${{needs.build-test.outputs.pipeline_success}}";
@@ -113,7 +116,7 @@ jobs:
   # -----------------------------
   pr-agent:
     needs: build-test
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     outputs:
       ai_approved: ${{ steps.set-approval.outputs.ai_approved }}
@@ -133,11 +136,11 @@ jobs:
             echo "ai_approved=false" >> $GITHUB_OUTPUT
 
   # -----------------------------
-  # Auto-merge if low risk
+  # Auto-merge if low risk + all checks pass
   # -----------------------------
   auto-merge:
     needs: [build-test, pr-agent]
-    if: needs.pr-agent.outputs.ai_approved == 'true' && needs.build-test.outputs.pipeline_success == '100'
+    if: github.event_name == 'pull_request_target' && needs.pr-agent.outputs.ai_approved == 'true' && needs.build-test.outputs.pipeline_success == '100'
     runs-on: ubuntu-latest
     steps:
       - name: Auto-merge PR
@@ -146,20 +149,22 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # -----------------------------
-  # Publish PR Summary JSON → GitHub Pages
+  # Publish PR Summary JSON for Dashboard
   # -----------------------------
   publish-dashboard:
     needs: [build-test, pr-agent, auto-merge]
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
 
-      - name: Generate JSON files
+      - name: Create PR Summary JSON
         run: |
-          mkdir -p public
-          cat <<EOF > public/pr_summary_${{ github.event.pull_request.number }}.json
+          mkdir -p reports
+          cat <<EOF > reports/pr_summary_${{ github.event.pull_request.number }}.json
           {
             "pr_number": "${{ github.event.pull_request.number }}",
             "title": "${{ github.event.pull_request.title }}",
@@ -171,20 +176,11 @@ jobs:
           }
           EOF
 
-          cp public/pr_summary_${{ github.event.pull_request.number }}.json public/latest.json
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: public
-
-  deploy-pages:
-    needs: publish-dashboard
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Commit & Push Report to reports branch
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git checkout -B reports
+          git add reports/
+          git commit -m "Add PR summary for #${{ github.event.pull_request.number }}"
+          git push origin reports --force
