@@ -222,6 +222,6 @@ jobs:
     needs: publish-dashboard
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/configure-pages@v4
+      - uses: actions/configure-pages@v5
       - uses: actions/deploy-pages@v4
 #html
